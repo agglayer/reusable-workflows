@@ -1,0 +1,24 @@
+name: Security Audit
+
+on:
+  workflow_call:
+    inputs:
+      audit-tool:
+        description: "Tool to use for auditing"
+        default: "rustsec/audit-check@v2.0.0"
+        required: false
+        type: string
+
+jobs:
+  audit:
+    name: Audit - crate security vulnerabilities
+    runs-on: ubuntu-latest
+    permissions:
+      checks: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - uses: ${{ inputs.audit-tool }}
+        with:
+          token: ${{ github.token }}
