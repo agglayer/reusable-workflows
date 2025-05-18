@@ -1,0 +1,35 @@
+version: 2
+updates:
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+    groups:
+      agglayer:
+        applies-to: version-updates
+        patterns:
+          - "aggchain-*"
+          - "aggkit-*"
+          - "agglayer-*"
+          - "proposer-*"
+          - "prover-*"
+          - "unified-bridge"
+
+      sp1:
+        applies-to: version-updates
+        patterns:
+          - "sp1-*"
+
+      external:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

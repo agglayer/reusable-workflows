@@ -1,0 +1,14 @@
+extend = [
+    { path = "scripts/make/Makefile.ci.toml" },
+    { path = "scripts/make/Makefile.contracts.toml" },
+    { path = "scripts/make/Makefile.e2e.toml" },
+    { path = "scripts/make/Makefile.fuzz.toml" },
+    { path = "scripts/make/Makefile.pp.toml" },
+    { path = "scripts/make/Makefile.proto.toml" },
+]
+
+[config]
+skip_core_tasks = true
+time_summary = true
+reduce_output = true
+default_to_workspace = false

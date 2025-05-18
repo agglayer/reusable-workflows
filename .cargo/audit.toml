@@ -1,0 +1,9 @@
+# RUSTSEC audit configuration.
+
+[advisories]
+ignore = [
+    # https://rustsec.org/advisories/RUSTSEC-2024-0437.html
+    "RUSTSEC-2024-0437",
+    # https://rustsec.org/advisories/RUSTSEC-2025-0009.html
+    "RUSTSEC-2025-0009"
+]

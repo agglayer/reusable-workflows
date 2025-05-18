@@ -1,0 +1,33 @@
+[package]
+name = "agglayer-grpc-types"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = []
+compat = ["dep:agglayer-types", "dep:bincode", "dep:thiserror"]
+
+[lints]
+workspace = true
+
+[dependencies]
+agglayer-types = { workspace = true, optional = true }
+agglayer-interop = { workspace = true, features = ["grpc-compat"] }
+
+bincode = { workspace = true, optional = true }
+hex.workspace = true
+pbjson = "0.7.0"
+prost.workspace = true
+serde.workspace = true
+tonic-types.workspace = true
+thiserror = { workspace = true, optional = true }
+
+[dev-dependencies]
+agglayer-types = { workspace = true, features = ["testutils"] }
+agglayer-interop = { workspace = true, features = ["testutils"] }
+
+anyhow.workspace = true
+bolero.workspace = true
+insta.workspace = true
+rstest.workspace = true
