@@ -2,6 +2,12 @@ name: Rust unit tests
 
 on:
   workflow_call:
+    inputs:
+      use-foundry:
+        description: "Install Foundry/Anvil"
+        default: true
+        required: false
+        type: boolean
 
 env:
   CARGO_TERM_COLOR: always
@@ -9,7 +15,7 @@ env:
   # Ajout de variables d'environnement pour optimiser Rust
   RUSTC_WRAPPER: sccache
   CARGO_NET_GIT_FETCH_WITH_CLI: true
-  CARGO_INCREMENTAL: 1
+  SCCACHE_GHA_ENABLED: true
   RUSTFLAGS: "-C target-cpu=native -C codegen-units=1"
 
 jobs:
@@ -26,15 +32,8 @@ jobs:
         id: cache_key
         run: echo "key=${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}" >> $GITHUB_OUTPUT
 
-      - name: Install sccache
-        run: |
-          curl -L https://github.com/mozilla/sccache/releases/download/v0.5.4/sccache-v0.5.4-x86_64-unknown-linux-musl.tar.gz | tar xz
-          sudo mv sccache-*/sccache /usr/local/bin/
-
-      - name: Set up sccache server
-        run: |
-          sccache --start-server
-          sccache -s
+      - name: Run sccache-cache
+        uses: mozilla-actions/sccache-action@v0.0.9
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -60,16 +59,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install sccache
-        run: |
-          curl -L https://github.com/mozilla/sccache/releases/download/v0.5.4/sccache-v0.5.4-x86_64-unknown-linux-musl.tar.gz | tar xz
-          sudo mv sccache-*/sccache /usr/local/bin/
+      - name: Run sccache-cache
+        uses: mozilla-actions/sccache-action@v0.0.9
 
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: taiki-e/install-action@v2
         with:
           tool: protoc,nextest
+
+      - name: Install Anvil (for unit tests)
+        if: ${{ inputs.use-foundry }}
+        uses: foundry-rs/foundry-toolchain@v1
 
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
@@ -82,8 +83,7 @@ jobs:
 
       - name: Run unit tests
         run: |
-          sccache --start-server
-          cargo nextest run --workspace --release --exclude-features integrations
+          cargo nextest run --workspace
 
   # isolated-feature-checks:
   #   name: "Isolated feature checks"
