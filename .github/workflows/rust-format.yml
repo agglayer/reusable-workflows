@@ -39,7 +39,7 @@ jobs:
       - uses: taiki-e/install-action@v2
         if: ${{ inputs.use-cargo-make}}
         with:
-          tool: make
+          tool: cargo-make
 
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
