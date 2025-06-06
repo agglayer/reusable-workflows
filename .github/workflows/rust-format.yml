@@ -49,6 +49,7 @@ jobs:
         with:
           prefix-key: "v2-rust"
           shared-key: ${{ steps.cache_key.outputs.key }}
+          cache-targets: false
           cache-directories: |
             ~/.cache/sccache
 
