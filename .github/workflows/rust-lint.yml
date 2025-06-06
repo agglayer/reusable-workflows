@@ -1,11 +1,11 @@
-name: Rust Format
+name: Rust Linting
 
 on:
   workflow_call:
     inputs:
-      format-command:
-        description: Command to use for checking format
-        default: cargo make ci-format
+      lint-command:
+        description: Command to use for linting
+        default: cargo make ci-clippy
         type: string
       use-cargo-make:
         description: Defines if cargo-make need to be install
@@ -13,8 +13,8 @@ on:
         type: boolean
 
 jobs:
-  format:
-    name: Format - crates formatting checking
+  linting:
+    name: Linting - crates linting
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -27,14 +27,14 @@ jobs:
       - name: Run sccache-cache
         uses: mozilla-actions/sccache-action@v0.0.9
 
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt
+          components: clippy
 
       - uses: taiki-e/install-action@v2
         if: ${{ inputs.use-cargo-make}}
         with:
-          tool: cargo-make
+          tool: cargo-make,protoc
 
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
@@ -45,5 +45,5 @@ jobs:
             ~/.cache/sccache
             target/
 
-      - name: Checking format
-        run: ${{ inputs.format-command }}
+      - name: Linting
+        run: ${{ inputs.linting-command }}
