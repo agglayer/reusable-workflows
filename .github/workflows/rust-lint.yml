@@ -43,7 +43,6 @@ jobs:
           shared-key: ${{ steps.cache_key.outputs.key }}
           cache-directories: |
             ~/.cache/sccache
-            target/
 
       - name: Linting
         run: ${{ inputs.linting-command }}

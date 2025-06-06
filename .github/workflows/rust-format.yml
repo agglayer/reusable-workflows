@@ -12,6 +12,14 @@ on:
         default: true
         type: boolean
 
+env:
+  CARGO_TERM_COLOR: always
+  REGISTRY: ghcr.io
+  RUSTC_WRAPPER: sccache
+  CARGO_NET_GIT_FETCH_WITH_CLI: true
+  SCCACHE_GHA_ENABLED: true
+  RUSTFLAGS: "-C target-cpu=native -C codegen-units=1"
+
 jobs:
   format:
     name: Format - crates formatting checking
@@ -43,7 +51,6 @@ jobs:
           shared-key: ${{ steps.cache_key.outputs.key }}
           cache-directories: |
             ~/.cache/sccache
-            target/
 
       - name: Checking format
         run: ${{ inputs.format-command }}
