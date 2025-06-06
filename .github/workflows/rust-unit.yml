@@ -45,7 +45,6 @@ jobs:
         with:
           prefix-key: "v2-rust"
           shared-key: ${{ steps.cache_key.outputs.key }}
-          # save-if: ${{ github.ref == 'refs/heads/main' }}
           cache-directories: |
             ~/.cache/sccache
             target/
@@ -78,6 +77,7 @@ jobs:
           shared-key: ${{ needs.setup.outputs.cache_key }}
           cache-directories: |
             ~/.cache/sccache
+            target/
 
       - name: Run unit tests
         run: |
