@@ -32,12 +32,12 @@ jobs:
         id: cache_key
         run: echo "key=${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}" >> $GITHUB_OUTPUT
 
-      - name: Run sccache-cache
-        uses: mozilla-actions/sccache-action@v0.0.9
-
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: rustfmt
+
+      - name: Run sccache-cache
+        uses: mozilla-actions/sccache-action@v0.0.9
 
       - uses: taiki-e/install-action@v2
         if: ${{ inputs.use-cargo-make}}

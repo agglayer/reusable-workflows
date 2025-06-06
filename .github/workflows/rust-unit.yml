@@ -31,10 +31,10 @@ jobs:
         id: cache_key
         run: echo "key=${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}" >> $GITHUB_OUTPUT
 
+      - uses: dtolnay/rust-toolchain@stable
+
       - name: Run sccache-cache
         uses: mozilla-actions/sccache-action@v0.0.9
-
-      - uses: dtolnay/rust-toolchain@stable
 
       - uses: taiki-e/install-action@v2
         with:
@@ -57,10 +57,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - uses: dtolnay/rust-toolchain@stable
+
       - name: Run sccache-cache
         uses: mozilla-actions/sccache-action@v0.0.9
-
-      - uses: dtolnay/rust-toolchain@stable
 
       - uses: taiki-e/install-action@v2
         with:
