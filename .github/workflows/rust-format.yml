@@ -1,0 +1,54 @@
+name: Security Audit
+
+on:
+  workflow_call:
+    inputs:
+      format_command:
+        description: Command to use for checking format
+        default: cargo make ci-format
+        type: string
+      use-cargo-make:
+        description: Defines if cargo-make need to be install
+        default: true
+        type: boolean
+
+jobs:
+  format:
+    name: Format - crate formatting checking
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # permissions:
+    #   contents: read
+    #   checks: write
+    #   issues: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Generate cache key
+        id: cache_key
+        run: echo "key=${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}" >> $GITHUB_OUTPUT
+
+      - name: Run sccache-cache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt
+
+      - uses: taiki-e/install-action@v2
+        if: ${{ input.use-cargo-make}}
+        with:
+          tool: make
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "v2-rust"
+          shared-key: ${{ steps.cache_key.outputs.key }}
+          cache-directories: |
+            ~/.cache/sccache
+            target/
+
+      - name: Checking format
+        run: ${{ input.format_command }}

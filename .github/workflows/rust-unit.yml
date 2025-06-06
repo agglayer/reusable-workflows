@@ -12,7 +12,6 @@ on:
 env:
   CARGO_TERM_COLOR: always
   REGISTRY: ghcr.io
-  # Ajout de variables d'environnement pour optimiser Rust
   RUSTC_WRAPPER: sccache
   CARGO_NET_GIT_FETCH_WITH_CLI: true
   SCCACHE_GHA_ENABLED: true
@@ -39,7 +38,7 @@ jobs:
 
       - uses: taiki-e/install-action@v2
         with:
-          tool: protoc,cargo-hack,nextest
+          tool: protoc,nextest
 
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
@@ -77,140 +76,9 @@ jobs:
         with:
           prefix-key: "v2-rust"
           shared-key: ${{ needs.setup.outputs.cache_key }}
-          # save-if: ${{ github.ref == 'refs/heads/main' }}
           cache-directories: |
             ~/.cache/sccache
 
       - name: Run unit tests
         run: |
           cargo nextest run --workspace
-
-  # isolated-feature-checks:
-  #   name: "Isolated feature checks"
-  #   needs: setup
-  #   runs-on: ubuntu-latest-16-cores
-  #   steps:
-  #     - uses: actions/checkout@v4
-
-  #     - name: Install sccache
-  #       run: |
-  #         curl -L https://github.com/mozilla/sccache/releases/download/v0.5.4/sccache-v0.5.4-x86_64-unknown-linux-musl.tar.gz | tar xz
-  #         sudo mv sccache-*/sccache /usr/local/bin/
-
-  #     - uses: dtolnay/rust-toolchain@stable
-
-  #     - uses: Swatinem/rust-cache@v2
-  #       with:
-  #         prefix-key: "v2-rust"
-  #         shared-key: ${{ needs.setup.outputs.cache_key }}
-  #         save-if: ${{ github.ref == 'refs/heads/main' }}
-  #         cache-directories: |
-  #           ~/.cache/sccache
-
-  #     - uses: taiki-e/install-action@v2
-  #       with:
-  #         tool: protoc,cargo-hack
-
-  #     - name: Check features
-  #       run: |
-  #         sccache --start-server
-  #         cargo hack --each-feature --all check --all-targets
-
-  # docker-build-local:
-  #   name: E2E Tests | Docker build
-  #   if: ${{ contains('["merge_group", "workflow_dispatch", "push"]', github.event_name) }}
-  #   uses: ./.github/workflows/docker-build.yml
-  #   secrets: inherit
-  #   permissions:
-  #     packages: write
-  #   with:
-  #     push: ${{ contains('["workflow_dispatch", "push"]', github.event_name) }}
-  #     local-artifact-name: "docker-image"
-  #     local-artifact-dir: "/tmp"
-
-  # integrations:
-  #   name: Integration tests
-  #   needs: [setup, docker-build-local]
-  #   if: ${{ contains('["merge_group", "workflow_dispatch"]', github.event_name) }}
-  #   runs-on: ubuntu-latest-16-cores
-  #   timeout-minutes: 30
-  #   steps:
-  #     - name: Checkout sources
-  #       uses: actions/checkout@v4
-
-  #     - name: Download artifact
-  #       uses: actions/download-artifact@v4
-  #       with:
-  #         name: "contracts-image"
-  #         path: "/tmp"
-
-  #     - name: Install sccache
-  #       run: |
-  #         curl -L https://github.com/mozilla/sccache/releases/download/v0.5.4/sccache-v0.5.4-x86_64-unknown-linux-musl.tar.gz | tar xz
-  #         sudo mv sccache-*/sccache /usr/local/bin/
-
-  #     - name: Load image
-  #       run: |
-  #         if [ -f "/tmp/contracts-image.tar" ]; then
-  #           docker load --input /tmp/contracts-image.tar
-  #           docker image ls -a
-  #         fi
-
-  #     - name: Install toolchain
-  #       uses: dtolnay/rust-toolchain@stable
-
-  #     - name: Set up rust cache
-  #       uses: Swatinem/rust-cache@v2
-  #       with:
-  #         prefix-key: "v2-rust"
-  #         shared-key: ${{ needs.setup.outputs.cache_key }}
-  #         save-if: ${{ github.ref == 'refs/heads/main' }}
-  #         cache-directories: |
-  #           ~/.cache/sccache
-
-  #     - uses: taiki-e/install-action@v2
-  #       with:
-  #         tool: nextest,protoc,cargo-hack
-
-  #     - name: Install Anvil
-  #       uses: foundry-rs/foundry-toolchain@v1
-
-  #     - name: Test
-  #       run: |
-  #         sccache --start-server
-  #         cargo nextest run --workspace -P integrations --release
-
-  # # Les autres jobs restent inchangés
-  # call-cdk-e2e-workflow:
-  #   name: E2E Tests | Kurtosis-CDK
-  #   if: ${{ contains('["merge_group", "workflow_dispatch"]', github.event_name) }}
-  #   needs:
-  #     - docker-build-local
-  #   uses: agglayer/e2e/.github/workflows/cdk-e2e.yml@8518659c9848160debc83d8de7366145d659d7b2 # jhilliard/gas-token-test
-  #   secrets: inherit
-  #   with:
-  #     docker-image-override: agglayer_image
-  #     docker-tag: ${{ needs.docker-build-local.outputs.tags }}
-  #     kurtosis-cdk-ref: 2527f38a96cedba1bff6cc94848ae77de8d44a37 # jihwan/integrations
-  #     docker-artifact-name: ${{ github.event_name == 'merge_group' && 'docker-image' || '' }}
-  #     agglayer-e2e-ref: 8518659c9848160debc83d8de7366145d659d7b2 # jhilliard/gas-token-test
-  #     kurtosis-cdk-args: |
-  #       {
-  #         "deployment_stages": {
-  #           "deploy_optimism_rollup": true
-  #         },
-  #         "args": {
-  #           "consensus_contract_type": "pessimistic",
-  #           "verbosity": "debug"
-  #         }
-  #       }
-
-  # check-e2e-result:
-  #   name: E2E Tests | Passed
-  #   needs:
-  #     - call-cdk-e2e-workflow
-  #   if: always()
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - run: exit 1
-  #       if: ${{ contains(fromJSON('["failure", "cancelled"]'), needs.call-cdk-e2e-workflow.result) }}
