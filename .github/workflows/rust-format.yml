@@ -37,7 +37,7 @@ jobs:
           components: rustfmt
 
       - uses: taiki-e/install-action@v2
-        if: ${{ input.use-cargo-make}}
+        if: ${{ inputs.use-cargo-make}}
         with:
           tool: make
 
@@ -51,4 +51,4 @@ jobs:
             target/
 
       - name: Checking format
-        run: ${{ input.format_command }}
+        run: ${{ inputs.format_command }}
