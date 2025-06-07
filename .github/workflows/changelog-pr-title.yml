@@ -21,3 +21,5 @@ jobs:
       - uses: amannn/action-semantic-pull-request@v5
         with:
           ignoreLabels: inputs.ignore-labels
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
