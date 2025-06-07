@@ -19,6 +19,10 @@ on:
         description: Program path (including ELF)
         required: true
         type: string
+      install-cargo-prove-command:
+        description: Command executed to install cargo prove
+        type: string
+        default: cargo make install-cargo-prove
       install-protoc:
         default: false
         type: boolean
@@ -68,7 +72,7 @@ jobs:
       - name: Install sp1 toolchain
         run: |
           curl -L https://sp1up.succinct.xyz | bash
-          cargo make install-cargo-prove
+          ${{ inputs.install-cargo-prove-command }}
           PATH="/home/runner/.sp1/bin:$PATH" cargo prove --version
 
       - name: Build the PP elf
