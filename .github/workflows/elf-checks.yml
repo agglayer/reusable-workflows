@@ -1,0 +1,85 @@
+name: Checking ELF
+
+on:
+  workflow_call:
+    inputs:
+      vkey-resolver:
+        description: Command that export the VKEY
+        required: true
+        type: string
+      program-builder:
+        description: Command to build the program
+        required: true
+        type: string
+      program:
+        description: Program name
+        required: true
+        type: string
+      program-path:
+        description: Program path (including ELF)
+        required: true
+        type: string
+      install-protoc:
+        default: false
+        type: boolean
+
+jobs:
+  check_elf:
+    runs-on: ubuntu-latest-16-cores
+    name: ${{ inputs.program }} ELF Checking
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Define source checksum
+        run: |
+          echo CHECKSUM="$(sha256sum ${{ inputs.program-path }} | awk '{ print $1 }')" >> "$GITHUB_ENV"
+
+      - name: Install toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Generate cache key
+        id: cache_key
+        run: echo "key=${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}" >> $GITHUB_OUTPUT
+
+      - name: Set up rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ${{ steps.cache_key.outputs.key }}
+
+      - uses: taiki-e/install-action@protoc
+        if: ${{ input.install-protoc }}
+
+      - name: Define vKey
+        run: |
+          echo ORIGINAL_VKEY="$(${{ inputs.vkey-resolver }})" >> "$GITHUB_ENV"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - uses: taiki-e/install-action@protoc
+
+      - name: Install cargo-make
+        run: cargo install --debug --locked cargo-make
+
+      - name: Install sp1 toolchain
+        run: |
+          curl -L https://sp1up.succinct.xyz | bash
+          cargo make install-cargo-prove
+          PATH="/home/runner/.sp1/bin:$PATH" cargo prove --version
+
+      - name: Build the PP elf
+        run: PATH="/home/runner/.sp1/bin:$PATH" ${{ inputs.program-builder }}
+
+      - name: ELF is up to date
+        run: diff <(sha256sum ${{ inputs.program-path }} | awk '{ print $1 }') <( echo $CHECKSUM )
+
+      - name: Check vKey
+        run: |
+          CALCULATED_VKEY=$(${{ inputs.vkey-resolver }})
+          echo "Commited vKey=$ORIGINAL_VKEY"
+          echo "Calculated vKey=$CALCULATED_VKEY"
+          diff <(echo $CALCULATED_VKEY) <( echo $ORIGINAL_VKEY )
