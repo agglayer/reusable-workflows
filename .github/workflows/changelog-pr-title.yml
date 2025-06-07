@@ -4,8 +4,8 @@ on:
   workflow_call:
     inputs:
       ignore-labels:
-        description: 'List of labels to ignore defined as list: "[''release'']"'
-        default: "[]"
+        description: "List of labels to ignore defined as list (new line delimited)"
+        default: ""
         type: string
 
 permissions:
@@ -20,4 +20,4 @@ jobs:
     steps:
       - uses: amannn/action-semantic-pull-request@v5
         with:
-          ignoreLabels: ${{ fromJSON(inputs.ignore-labels) }}
+          ignoreLabels: inputs.ignore-labels
