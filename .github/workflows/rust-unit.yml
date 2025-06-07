@@ -3,6 +3,11 @@ name: Rust unit tests
 on:
   workflow_call:
     inputs:
+      nextest-args:
+        description: Args passed to cargo nextest run
+        default: --workspace
+        required: true
+        type: string
       use-foundry:
         description: "Install Foundry/Anvil"
         default: true
@@ -80,4 +85,4 @@ jobs:
 
       - name: Run unit tests
         run: |
-          cargo nextest run --workspace
+          cargo nextest run ${{ inputs.nextest-args}}
