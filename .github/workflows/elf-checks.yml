@@ -48,7 +48,7 @@ jobs:
           shared-key: ${{ steps.cache_key.outputs.key }}
 
       - uses: taiki-e/install-action@protoc
-        if: ${{ input.install-protoc }}
+        if: ${{ inputs.install-protoc }}
 
       - name: Define vKey
         run: |
