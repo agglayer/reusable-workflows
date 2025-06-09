@@ -13,6 +13,10 @@ on:
         default: true
         required: false
         type: boolean
+      isolated-compilation-check:
+        description: Define if this workflow needs to check for isolated compilation
+        default: false
+        type: boolean
 
 env:
   CARGO_TERM_COLOR: always
@@ -86,3 +90,22 @@ jobs:
       - name: Run unit tests
         run: |
           cargo nextest run ${{ inputs.nextest-args}}
+
+  isolated-compilation:
+    name: "Isolated feature checks"
+    runs-on: ubuntu-latest-16-cores
+    if: ${{ inputs.isolated-compilation-check }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Run sccache-cache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: protoc,cargo-hack
+
+      - run: cargo hack --each-feature --all check --all-targets
