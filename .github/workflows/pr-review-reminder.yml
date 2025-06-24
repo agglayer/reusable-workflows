@@ -1,0 +1,474 @@
+name: PR Review Reminder
+
+on:
+  workflow_call:
+    inputs:
+      min_days_old:
+        description: "Minimum number of days a PR must be open"
+        required: false
+        type: number
+        default: 2
+      dry_run:
+        description: "Run without sending Slack notification (for testing)"
+        required: false
+        type: boolean
+        default: false
+      repository:
+        description: "Repository to check (owner/repo format, defaults to current repo)"
+        required: false
+        type: string
+        default: ""
+      include_drafts:
+        description: "Include draft PRs in the check"
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  pr-review-reminder:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      pull-requests: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check PRs and send Slack notification
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          MIN_DAYS_OLD: ${{ inputs.min_days_old }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          INCLUDE_DRAFTS: ${{ inputs.include_drafts }}
+        run: |
+          # Get repository info
+          if [ -n "${{ inputs.repository }}" ]; then
+            IFS='/' read -r REPO_OWNER REPO_NAME <<< "${{ inputs.repository }}"
+          else
+            REPO_OWNER="${{ github.repository_owner }}"
+            REPO_NAME="${{ github.event.repository.name }}"
+          fi
+
+          echo "🔍 Checking PRs for $REPO_OWNER/$REPO_NAME"
+          echo "📅 Minimum age: $MIN_DAYS_OLD days"
+          echo "🧪 Dry run mode: $DRY_RUN"
+          echo "📝 Include drafts: $INCLUDE_DRAFTS"
+
+          # Validate GitHub token
+          if [ -z "$GITHUB_TOKEN" ]; then
+            echo "❌ Error: GITHUB_TOKEN is not set"
+            exit 1
+          fi
+
+          # Test GitHub token validity
+          echo "🔐 Validating GitHub token..."
+          TOKEN_TEST=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            -H "User-Agent: PR-Review-Reminder/1.0" \
+            -w "%{http_code}" \
+            https://api.github.com/user)
+
+          HTTP_CODE="${TOKEN_TEST: -3}"
+          TOKEN_RESPONSE="${TOKEN_TEST%???}"
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "❌ GitHub token validation failed (HTTP $HTTP_CODE)"
+            echo "Token response: $TOKEN_RESPONSE"
+            echo "📝 Possible issues:"
+            echo "  - Token is expired or invalid"
+            echo "  - Token doesn't have required permissions"
+            echo "  - Rate limit exceeded"
+            echo "  - Network connectivity issues"
+            exit 1
+          fi
+
+          TOKEN_USER=$(echo "$TOKEN_RESPONSE" | jq -r '.login // "unknown"')
+          echo "✅ GitHub token valid for user: $TOKEN_USER"
+
+          # Validate inputs
+          if [ "$DRY_RUN" = "false" ] && [ -z "$SLACK_WEBHOOK_URL" ]; then
+            echo "❌ Error: SLACK_WEBHOOK_URL is required when dry_run is false"
+            exit 1
+          fi
+
+          # GitHub API headers
+          API_HEADERS=(
+            -H "Authorization: token $GITHUB_TOKEN"
+            -H "Accept: application/vnd.github.v3+json"
+            -H "User-Agent: PR-Review-Reminder/1.0"
+          )
+
+          # Get codeowners from CODEOWNERS file
+          CODEOWNERS=""
+          if [ -f ".github/CODEOWNERS" ]; then
+            CODEOWNERS=$(grep -v '^#' .github/CODEOWNERS | grep -v '^$' | awk '{for(i=2;i<=NF;i++) print $i}' | sed 's/@//g' | tr '\n' ' ')
+            echo "👥 Codeowners: $CODEOWNERS"
+          else
+            echo "⚠️ No CODEOWNERS file found, trying to fetch from API..."
+            # Try to get CODEOWNERS from API
+            CODEOWNERS_RESPONSE=$(curl -s "${API_HEADERS[@]}" \
+              "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/contents/.github/CODEOWNERS")
+
+            if echo "$CODEOWNERS_RESPONSE" | jq -e '.content' > /dev/null 2>&1; then
+              CODEOWNERS_CONTENT=$(echo "$CODEOWNERS_RESPONSE" | jq -r '.content' | base64 -d)
+              CODEOWNERS=$(echo "$CODEOWNERS_CONTENT" | grep -v '^#' | grep -v '^$' | awk '{for(i=2;i<=NF;i++) print $i}' | sed 's/@//g' | tr '\n' ' ')
+              echo "👥 Codeowners (from API): $CODEOWNERS"
+            else
+              echo "⚠️ No CODEOWNERS file found in repository"
+            fi
+          fi
+
+          # Get all open PRs using GitHub API
+          echo "📊 Fetching open PRs..."
+          PR_RESPONSE=$(curl -s "${API_HEADERS[@]}" \
+            -w "%{http_code}" \
+            "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/pulls?state=open&per_page=100")
+
+          # Extract HTTP status code and response body
+          PR_HTTP_CODE="${PR_RESPONSE: -3}"
+          PR_BODY="${PR_RESPONSE%???}"
+
+          # Save response body to file
+          echo "$PR_BODY" > prs.json
+
+          # Check if API call was successful
+          if [ "$PR_HTTP_CODE" != "200" ]; then
+            echo "❌ Failed to fetch PRs from GitHub API (HTTP $PR_HTTP_CODE)"
+            echo "API Response: $PR_BODY"
+            echo "📝 Possible issues:"
+            echo "  - Repository not found or no access: $REPO_OWNER/$REPO_NAME"
+            echo "  - Token doesn't have 'pull-requests: read' permission"
+            echo "  - Repository is private and token lacks access"
+            echo "  - Rate limit exceeded"
+            exit 1
+          fi
+
+          # Check for API errors in response body
+          if echo "$PR_BODY" | jq -e '.message' > /dev/null 2>&1; then
+            ERROR_MSG=$(echo "$PR_BODY" | jq -r '.message')
+            echo "❌ GitHub API Error: $ERROR_MSG"
+            echo "📝 Full response: $PR_BODY"
+            exit 1
+          fi
+
+          # Validate that we got an array
+          if ! echo "$PR_BODY" | jq -e 'type == "array"' > /dev/null 2>&1; then
+            echo "❌ Unexpected API response format (expected array)"
+            echo "Response: $PR_BODY"
+            exit 1
+          fi
+
+          TOTAL_PRS=$(jq length prs.json)
+          echo "📊 Found $TOTAL_PRS open PRs"
+
+          # Initialize arrays for filtered PRs
+          FILTERED_PRS="[]"
+
+          # Calculate date threshold
+          DATE_THRESHOLD=$(date -d "$MIN_DAYS_OLD days ago" --iso-8601=seconds)
+
+          # Function to check team membership
+          check_team_membership() {
+            local author=$1
+            local team_name=$2
+
+            # Handle team format like "org/team-name"
+            if [[ "$team_name" == *"/"* ]]; then
+              local org_team=(${team_name//\// })
+              local org=${org_team[0]}
+              local team=${org_team[1]}
+            else
+              local org=$REPO_OWNER
+              local team=$team_name
+            fi
+
+            # Check team membership via API
+            local membership_response=$(curl -s "${API_HEADERS[@]}" \
+              -w "%{http_code}" \
+              "https://api.github.com/orgs/$org/teams/$team/memberships/$author" 2>/dev/null)
+
+            local membership_http_code="${membership_response: -3}"
+            local membership_body="${membership_response%???}"
+
+            if [ "$membership_http_code" = "200" ]; then
+              if echo "$membership_body" | jq -e '.state' > /dev/null 2>&1; then
+                local state=$(echo "$membership_body" | jq -r '.state')
+                if [ "$state" = "active" ]; then
+                  return 0  # Author is team member
+                fi
+              fi
+            elif [ "$membership_http_code" = "404" ]; then
+              # 404 means user is not a member (this is expected)
+              return 1
+            else
+              # Other errors (403 forbidden, etc.)
+              echo "   ⚠️  Team membership check failed for $team (HTTP $membership_http_code)"
+            fi
+
+            return 1  # Author is not team member
+          }
+
+          # Function to get PR reviews
+          get_pr_reviews() {
+            local pr_number=$1
+            local reviews_response=$(curl -s "${API_HEADERS[@]}" \
+              -w "%{http_code}" \
+              "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/pulls/$pr_number/reviews")
+
+            local reviews_http_code="${reviews_response: -3}"
+            local reviews_body="${reviews_response%???}"
+
+            if [ "$reviews_http_code" = "200" ]; then
+              echo "$reviews_body"
+            else
+              echo "[]"  # Return empty array on error
+            fi
+          }
+
+          # Function to get PR requested reviewers
+          get_pr_requested_reviewers() {
+            local pr_number=$1
+            local reviewers_response=$(curl -s "${API_HEADERS[@]}" \
+              -w "%{http_code}" \
+              "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/pulls/$pr_number/requested_reviewers")
+
+            local reviewers_http_code="${reviewers_response: -3}"
+            local reviewers_body="${reviewers_response%???}"
+
+            if [ "$reviewers_http_code" = "200" ]; then
+              echo "$reviewers_body"
+            else
+              echo '{"users":[],"teams":[]}'  # Return empty structure on error
+            fi
+          }
+
+          # Process each PR
+          for i in $(seq 0 $((TOTAL_PRS - 1))); do
+            PR=$(jq ".[$i]" prs.json)
+
+            PR_NUMBER=$(echo "$PR" | jq -r '.number')
+            PR_TITLE=$(echo "$PR" | jq -r '.title')
+            PR_AUTHOR=$(echo "$PR" | jq -r '.user.login')
+            PR_CREATED=$(echo "$PR" | jq -r '.created_at')
+            PR_URL=$(echo "$PR" | jq -r '.html_url')
+            PR_DRAFT=$(echo "$PR" | jq -r '.draft')
+
+            echo ""
+            echo "🔍 Checking PR #$PR_NUMBER: $PR_TITLE"
+            echo "   Author: $PR_AUTHOR"
+
+            # Skip draft PRs unless explicitly included
+            if [ "$PR_DRAFT" = "true" ] && [ "$INCLUDE_DRAFTS" = "false" ]; then
+              echo "   ❌ PR is a draft - skipping"
+              continue
+            fi
+
+            # Check if author is in codeowners
+            AUTHOR_IS_CODEOWNER=false
+            if [[ " $CODEOWNERS " == *" $PR_AUTHOR "* ]]; then
+              AUTHOR_IS_CODEOWNER=true
+            else
+              # Check if author is member of any team in codeowners
+              for owner in $CODEOWNERS; do
+                if [[ "$owner" == *"/"* ]] || [[ "$owner" == *"-developers"* ]] || [[ "$owner" == *"-team"* ]] || [[ "$owner" == *"-maintainers"* ]]; then
+                  if check_team_membership "$PR_AUTHOR" "$owner"; then
+                    AUTHOR_IS_CODEOWNER=true
+                    break
+                  fi
+                fi
+              done
+            fi
+
+            if [ "$AUTHOR_IS_CODEOWNER" = "false" ]; then
+              echo "   ❌ Author is not a codeowner or team member"
+              continue
+            fi
+
+            echo "   ✅ Author is a codeowner or team member"
+
+            # Check if PR is older than threshold
+            if [[ "$PR_CREATED" > "$DATE_THRESHOLD" ]]; then
+              echo "   ❌ PR is less than $MIN_DAYS_OLD days old"
+              continue
+            fi
+
+            echo "   ✅ PR is older than $MIN_DAYS_OLD days"
+
+            # Check if PR is waiting for review
+            REVIEWS=$(get_pr_reviews "$PR_NUMBER")
+            REVIEW_REQUESTS=$(get_pr_requested_reviewers "$PR_NUMBER")
+
+            WAITING_FOR_REVIEW=false
+
+            # If there are pending review requests, it's waiting
+            PENDING_REVIEWERS=$(echo "$REVIEW_REQUESTS" | jq '.users | length')
+            PENDING_TEAMS=$(echo "$REVIEW_REQUESTS" | jq '.teams | length')
+
+            if [ "$PENDING_REVIEWERS" -gt 0 ] || [ "$PENDING_TEAMS" -gt 0 ]; then
+              WAITING_FOR_REVIEW=true
+            # If no reviews at all, it's waiting
+            elif [ "$(echo "$REVIEWS" | jq length)" -eq 0 ]; then
+              WAITING_FOR_REVIEW=true
+            else
+              # Check if any reviews are approvals
+              APPROVALS=$(echo "$REVIEWS" | jq '[.[] | select(.state == "APPROVED")] | length')
+              if [ "$APPROVALS" -eq 0 ]; then
+                WAITING_FOR_REVIEW=true
+              fi
+            fi
+
+            if [ "$WAITING_FOR_REVIEW" = "false" ]; then
+              echo "   ❌ PR is not waiting for review"
+              continue
+            fi
+
+            echo "   ✅ PR is waiting for review"
+            echo "   🎯 PR matches all criteria - adding to list"
+
+            # Calculate days old
+            CREATED_TIMESTAMP=$(date -d "$PR_CREATED" +%s)
+            CURRENT_TIMESTAMP=$(date +%s)
+            DAYS_OLD=$(( (CURRENT_TIMESTAMP - CREATED_TIMESTAMP) / 86400 ))
+
+            # Get requested reviewers list
+            REQUESTED_USERS=$(echo "$REVIEW_REQUESTS" | jq -r '.users[].login' | tr '\n' ',' | sed 's/,$//')
+            REQUESTED_TEAMS=$(echo "$REVIEW_REQUESTS" | jq -r '.teams[].name' | tr '\n' ',' | sed 's/,$//')
+
+            REQUESTED_REVIEWERS=""
+            if [ -n "$REQUESTED_USERS" ]; then
+              REQUESTED_REVIEWERS="$REQUESTED_USERS"
+            fi
+            if [ -n "$REQUESTED_TEAMS" ]; then
+              if [ -n "$REQUESTED_REVIEWERS" ]; then
+                REQUESTED_REVIEWERS="$REQUESTED_REVIEWERS, $REQUESTED_TEAMS"
+              else
+                REQUESTED_REVIEWERS="$REQUESTED_TEAMS"
+              fi
+            fi
+
+            # Add to filtered list
+            PR_INFO=$(jq -n \
+              --arg number "$PR_NUMBER" \
+              --arg title "$PR_TITLE" \
+              --arg author "$PR_AUTHOR" \
+              --arg url "$PR_URL" \
+              --arg days "$DAYS_OLD" \
+              --arg reviewers "$REQUESTED_REVIEWERS" \
+              --arg draft "$PR_DRAFT" \
+              '{number: $number, title: $title, author: $author, url: $url, daysOld: $days, requestedReviewers: $reviewers, isDraft: ($draft == "true")}')
+
+            FILTERED_PRS=$(echo "$FILTERED_PRS" | jq ". + [$PR_INFO]")
+          done
+
+          # Count filtered PRs
+          FILTERED_COUNT=$(echo "$FILTERED_PRS" | jq length)
+          echo ""
+          echo "📋 Final result: $FILTERED_COUNT PRs match criteria"
+
+          # Output results for other jobs/steps
+          echo "filtered_prs_count=$FILTERED_COUNT" >> $GITHUB_OUTPUT
+          echo "filtered_prs<<EOF" >> $GITHUB_OUTPUT
+          echo "$FILTERED_PRS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+          # Prepare Slack message
+          if [ "$FILTERED_COUNT" -eq 0 ]; then
+            SLACK_MESSAGE='{
+              "text": "🎉 No PRs requiring review attention today!",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "🎉 *No PRs requiring review attention today!*\n\nAll PRs are either:\n• From non-codeowners/team members\n• Recently created (less than '$MIN_DAYS_OLD' days old)\n• Already reviewed or approved"
+                  }
+                }
+              ]
+            }'
+          else
+            # Build blocks for each PR
+            BLOCKS='[
+              {
+                "type": "section",
+                "text": {
+                  "type": "mrkdwn",
+                  "text": "📋 *PR Review Reminder for '$REPO_OWNER'/'$REPO_NAME'*\n\nFound '$FILTERED_COUNT' PR(s) that need attention:"
+                }
+              },
+              {"type": "divider"}
+            ]'
+
+            for i in $(seq 0 $((FILTERED_COUNT - 1))); do
+              PR=$(echo "$FILTERED_PRS" | jq ".[$i]")
+
+              PR_TITLE=$(echo "$PR" | jq -r '.title')
+              PR_AUTHOR=$(echo "$PR" | jq -r '.author')
+              PR_URL=$(echo "$PR" | jq -r '.url')
+              PR_DAYS=$(echo "$PR" | jq -r '.daysOld')
+              PR_REVIEWERS=$(echo "$PR" | jq -r '.requestedReviewers')
+              PR_DRAFT=$(echo "$PR" | jq -r '.isDraft')
+
+              DRAFT_BADGE=""
+              if [ "$PR_DRAFT" = "true" ]; then
+                DRAFT_BADGE="🔸 *DRAFT* "
+              fi
+
+              REVIEWER_TEXT=""
+              if [ -n "$PR_REVIEWERS" ] && [ "$PR_REVIEWERS" != "" ] && [ "$PR_REVIEWERS" != "null" ]; then
+                REVIEWER_TEXT="👥 Waiting for: $PR_REVIEWERS\n"
+              else
+                REVIEWER_TEXT="⏳ No specific reviewers assigned\n"
+              fi
+
+              BLOCK=$(jq -n \
+                --arg title "$PR_TITLE" \
+                --arg author "$PR_AUTHOR" \
+                --arg url "$PR_URL" \
+                --arg days "$PR_DAYS" \
+                --arg reviewers "$REVIEWER_TEXT" \
+                --arg draft "$DRAFT_BADGE" \
+                '{
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": ($draft + "*<" + $url + "|" + $title + ">*\n👤 Author: " + $author + "\n📅 Created: " + $days + " days ago\n" + $reviewers + "🔗 <" + $url + "|View PR>")
+                  }
+                }')
+
+              BLOCKS=$(echo "$BLOCKS" | jq ". + [$BLOCK]")
+            done
+
+            SLACK_MESSAGE=$(jq -n \
+              --arg text "PR Review Reminder - $FILTERED_COUNT PRs need attention" \
+              --argjson blocks "$BLOCKS" \
+              '{text: $text, blocks: $blocks}')
+          fi
+
+          # Send Slack notification or show dry run message
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "🧪 DRY RUN MODE - Slack message that would be sent:"
+            echo "$SLACK_MESSAGE" | jq .
+            echo "✅ Dry run completed successfully"
+          else
+            echo "📤 Sending Slack notification..."
+            RESPONSE=$(curl -s -w "%{http_code}" -X POST "$SLACK_WEBHOOK_URL" \
+              -H "Content-Type: application/json" \
+              -d "$SLACK_MESSAGE")
+
+            HTTP_CODE="${RESPONSE: -3}"
+            RESPONSE_BODY="${RESPONSE%???}"
+
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "✅ Slack notification sent successfully"
+            else
+              echo "❌ Failed to send Slack notification (HTTP $HTTP_CODE)"
+              echo "Response: $RESPONSE_BODY"
+              exit 1
+            fi
+          fi
+
+          # Clean up
+          rm -f prs.json

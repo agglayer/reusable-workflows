@@ -1,0 +1,105 @@
+name: Security Scan
+
+on:
+  workflow_call:
+    inputs:
+      docker-image:
+        description: "Docker image to scan (with tag or digest)"
+        required: true
+        type: string
+      sarif-output:
+        description: "SARIF output filename"
+        default: "security-scan-results.sarif"
+        type: string
+      scan-type:
+        description: "Type of scan to perform"
+        default: "image"
+        type: string
+      fail-on-severity:
+        description: "Fail on vulnerabilities of this severity or higher"
+        default: "CRITICAL"
+        type: string
+    outputs:
+      scan-results:
+        description: "Summary of scan results"
+        value: ${{ jobs.security-scan.outputs.results }}
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+jobs:
+  security-scan:
+    name: Vulnerability Scan
+    runs-on: ubuntu-latest
+    outputs:
+      results: ${{ steps.scan-summary.outputs.results }}
+    steps:
+      - name: Pull Docker image
+        if: inputs.scan-type == 'image'
+        run: docker pull ${{ inputs.docker-image }}
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ inputs.docker-image }}
+          format: 'sarif'
+          output: ${{ inputs.sarif-output }}
+          severity: 'UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL'
+          exit-code: '0'
+
+      - name: Run Trivy for summary
+        id: trivy-summary
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ inputs.docker-image }}
+          format: 'json'
+          output: 'scan-summary.json'
+          severity: 'UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL'
+          exit-code: '0'
+
+      - name: Process scan results
+        id: scan-summary
+        run: |
+          if [ -f scan-summary.json ]; then
+            CRITICAL=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="CRITICAL")] | length' scan-summary.json 2>/dev/null || echo "0")
+            HIGH=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="HIGH")] | length' scan-summary.json 2>/dev/null || echo "0")
+            MEDIUM=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="MEDIUM")] | length' scan-summary.json 2>/dev/null || echo "0")
+            LOW=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="LOW")] | length' scan-summary.json 2>/dev/null || echo "0")
+            
+            echo "results=Critical: $CRITICAL, High: $HIGH, Medium: $MEDIUM, Low: $LOW" >> $GITHUB_OUTPUT
+            
+            echo "## 🛡️ Security Scan Results" >> $GITHUB_STEP_SUMMARY
+            echo "| Severity | Count |" >> $GITHUB_STEP_SUMMARY
+            echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+            echo "| Critical | $CRITICAL |" >> $GITHUB_STEP_SUMMARY
+            echo "| High | $HIGH |" >> $GITHUB_STEP_SUMMARY
+            echo "| Medium | $MEDIUM |" >> $GITHUB_STEP_SUMMARY
+            echo "| Low | $LOW |" >> $GITHUB_STEP_SUMMARY
+            
+            if [ "${{ inputs.fail-on-severity }}" = "CRITICAL" ] && [ "$CRITICAL" -gt 0 ]; then
+              echo "❌ Critical vulnerabilities found: $CRITICAL"
+              exit 1
+            elif [ "${{ inputs.fail-on-severity }}" = "HIGH" ] && [ $((CRITICAL + HIGH)) -gt 0 ]; then
+              echo "❌ High or Critical vulnerabilities found: $((CRITICAL + HIGH))"
+              exit 1
+            fi
+          else
+            echo "results=Scan completed - no results file generated" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: ${{ inputs.sarif-output }}
+
+      - name: Upload scan artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-scan-results
+          path: |
+            ${{ inputs.sarif-output }}
+            scan-summary.json
