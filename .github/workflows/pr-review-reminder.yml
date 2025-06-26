@@ -459,6 +459,14 @@ jobs:
             fi
 
             echo "   ✅ PR is waiting for review"
+
+            # Check if PR has requested reviewers
+            if [ "$PENDING_REVIEWERS" -eq 0 ] && [ "$PENDING_TEAMS" -eq 0 ]; then
+              echo "   ❌ PR has no requested reviewers - skipping"
+              continue
+            fi
+
+            echo "   ✅ PR has requested reviewers"
             echo "   🎯 PR matches all criteria - adding to list"
 
             # Calculate days ready
