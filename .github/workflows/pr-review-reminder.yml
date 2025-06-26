@@ -407,10 +407,10 @@ jobs:
               # Check if author is member of any team in codeowners
               for owner in $CODEOWNERS; do
                 if [[ "$owner" == *"/"* ]] || [[ "$owner" == *"-developers"* ]] || [[ "$owner" == *"-team"* ]] || [[ "$owner" == *"-maintainers"* ]]; then
-                  if check_team_membership "$PR_AUTHOR" "$owner"; then
+                  # if check_team_membership "$PR_AUTHOR" "$owner"; then
                     AUTHOR_IS_CODEOWNER=true
                     break
-                  fi
+                  # fi
                 fi
               done
             fi
@@ -541,7 +541,7 @@ jobs:
 
               REVIEWER_INFO=""
               if [ -n "$PR_REVIEWERS" ] && [ "$PR_REVIEWERS" != "" ] && [ "$PR_REVIEWERS" != "null" ]; then
-                REVIEWER_INFO=" | 👥 Waiting for: $PR_REVIEWERS"
+                REVIEWER_INFO=" | Waiting for: $PR_REVIEWERS"
               fi
 
               LATEST_REVIEW_INFO=""
@@ -550,12 +550,12 @@ jobs:
                 REVIEW_TIMESTAMP=$(date -d "$PR_LATEST_REVIEW" +%s)
                 CURRENT_TIMESTAMP=$(date +%s)
                 DAYS_SINCE_REVIEW=$(( (CURRENT_TIMESTAMP - REVIEW_TIMESTAMP) / 86400 ))
-                LATEST_REVIEW_INFO=" | 📝 Last review ${DAYS_SINCE_REVIEW}d ago"
+                LATEST_REVIEW_INFO=" / Last review ${DAYS_SINCE_REVIEW}d ago"
               else
-                LATEST_REVIEW_INFO=" | 📝 Last review Never"
+                LATEST_REVIEW_INFO=" / Last review Never"
               fi
 
-              # Build single line: • <URL|Title> | ⏱️ ready Xd ago | 📝 Last review | 👥 Waiting for: reviewers
+              # Build single line: • <URL|Title> | ⏱️ ready Xd ago / Last review | Waiting for: reviewers
               PR_LINE="$BULLET <$PR_URL|$PR_TITLE> | ⏱️ ready ${PR_DAYS_READY}d ago${LATEST_REVIEW_INFO}${REVIEWER_INFO}"$'\n'
               PR_LIST_TEXT="${PR_LIST_TEXT}${PR_LINE}"
             done
