@@ -4,7 +4,7 @@ on:
   workflow_call:
     inputs:
       min_days_old:
-        description: "Minimum number of days a PR must be open"
+        description: "Minimum number of days a PR must be ready for review (not draft)"
         required: false
         type: number
         default: 2
@@ -54,7 +54,7 @@ jobs:
           fi
 
           echo "🔍 Checking PRs for $REPO_OWNER/$REPO_NAME"
-          echo "📅 Minimum age: $MIN_DAYS_OLD days"
+          echo "📅 Minimum ready time: $MIN_DAYS_OLD days"
           echo "🧪 Dry run mode: $DRY_RUN"
           echo "📝 Include drafts: $INCLUDE_DRAFTS"
 
@@ -257,6 +257,121 @@ jobs:
             fi
           }
 
+          # Function to get latest review date
+          get_latest_review_date() {
+            local pr_number=$1
+            local reviews=$(get_pr_reviews "$pr_number")
+
+            echo "   🔍 Getting latest review date for PR #$pr_number" >&2
+
+            local review_count=$(echo "$reviews" | jq length)
+            echo "   📊 Found $review_count reviews" >&2
+
+            if [ "$review_count" -gt 0 ]; then
+              # Get the most recent review date
+              local latest_date=$(echo "$reviews" | jq -r '[.[].submitted_at] | sort | last')
+              if [ "$latest_date" != "null" ] && [ -n "$latest_date" ]; then
+                echo "   📅 Latest review date: $latest_date" >&2
+                echo "$latest_date"
+                return
+              fi
+            fi
+
+            # No reviews found
+            echo "   📅 No reviews found" >&2
+            echo ""
+          }
+
+          # Function to get when PR became ready for review
+          get_pr_ready_date() {
+            local pr_number=$1
+            local pr_created=$2
+            local pr_draft=$3
+
+            echo "   🔍 Calculating ready date for PR #$pr_number (current draft: $pr_draft)" >&2
+
+            # Always get timeline to handle complex ready/draft/ready transitions
+            local timeline_response=$(curl -s "${API_HEADERS[@]}" \
+              -w "%{http_code}" \
+              "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/issues/$pr_number/timeline")
+
+            local timeline_http_code="${timeline_response: -3}"
+            local timeline_body="${timeline_response%???}"
+
+            if [ "$timeline_http_code" = "200" ]; then
+              # Get all ready_for_review and convert_to_draft events with timestamps
+              local events=$(echo "$timeline_body" | jq -r '.[] | select(.event == "ready_for_review" or .event == "convert_to_draft") | "\(.created_at) \(.event)"' | sort)
+
+              if [ -n "$events" ]; then
+                echo "   📊 Found timeline events:" >&2
+                echo "$events" | while read -r event; do
+                  echo "      $event" >&2
+                done
+              else
+                echo "   📊 No ready/draft timeline events found" >&2
+              fi
+
+              if [ -n "$events" ]; then
+                # Find the last ready_for_review event that wasn't followed by convert_to_draft
+                local last_ready_date=""
+                local current_state="ready"  # Assume created ready unless we see convert_to_draft first
+
+                # Check if PR was created as draft by looking for convert_to_draft before any ready_for_review
+                local first_event=$(echo "$events" | head -1 | awk '{print $2}')
+                if [ "$first_event" = "convert_to_draft" ]; then
+                  current_state="draft"
+                fi
+
+                # Process events chronologically
+                while IFS= read -r event_line; do
+                  if [ -n "$event_line" ]; then
+                    local event_date=$(echo "$event_line" | awk '{print $1}')
+                    local event_type=$(echo "$event_line" | awk '{print $2}')
+
+                    if [ "$event_type" = "ready_for_review" ]; then
+                      last_ready_date="$event_date"
+                      current_state="ready"
+                    elif [ "$event_type" = "convert_to_draft" ]; then
+                      current_state="draft"
+                    fi
+                  fi
+                done <<< "$events"
+
+                # If we found a ready event and current state matches PR status, use it
+                if [ -n "$last_ready_date" ]; then
+                  echo "   📅 Last ready date from timeline: $last_ready_date (current timeline state: $current_state)" >&2
+                  if [ "$pr_draft" = "false" ] && [ "$current_state" = "ready" ]; then
+                    echo "   ✅ Using timeline ready date: $last_ready_date" >&2
+                    echo "$last_ready_date"
+                    return
+                  elif [ "$pr_draft" = "true" ] && [ "$current_state" = "draft" ] && [ -n "$last_ready_date" ]; then
+                    # PR is currently draft but was ready before - use last ready date
+                    echo "   ✅ Using last ready date (PR now draft): $last_ready_date" >&2
+                    echo "$last_ready_date"
+                    return
+                  fi
+                fi
+              fi
+
+              # No timeline events found, check if PR was created ready
+              if [ "$pr_draft" = "false" ]; then
+                echo "   ✅ Using creation date (created ready): $pr_created" >&2
+                echo "$pr_created"
+                return
+              fi
+            fi
+
+            # Fallback: if PR is currently draft and no ready events found, it was never ready
+            if [ "$pr_draft" = "true" ]; then
+              echo "   ⚠️  Using creation date (draft, never ready): $pr_created" >&2
+              echo "$pr_created"  # Use creation date but this PR should probably be filtered out
+            else
+              # PR is currently ready but no timeline events - created ready
+              echo "   ✅ Using creation date (fallback, ready): $pr_created" >&2
+              echo "$pr_created"
+            fi
+          }
+
           # Process each PR
           for i in $(seq 0 $((TOTAL_PRS - 1))); do
             PR=$(jq ".[$i]" prs.json)
@@ -267,6 +382,12 @@ jobs:
             PR_CREATED=$(echo "$PR" | jq -r '.created_at')
             PR_URL=$(echo "$PR" | jq -r '.html_url')
             PR_DRAFT=$(echo "$PR" | jq -r '.draft')
+
+            # Get when PR became ready for review
+            PR_READY_DATE=$(get_pr_ready_date "$PR_NUMBER" "$PR_CREATED" "$PR_DRAFT")
+
+            # Get latest review date
+            PR_LATEST_REVIEW=$(get_latest_review_date "$PR_NUMBER")
 
             echo ""
             echo "🔍 Checking PR #$PR_NUMBER: $PR_TITLE"
@@ -301,13 +422,13 @@ jobs:
 
             echo "   ✅ Author is a codeowner or team member"
 
-            # Check if PR is older than threshold
-            if [[ "$PR_CREATED" > "$DATE_THRESHOLD" ]]; then
-              echo "   ❌ PR is less than $MIN_DAYS_OLD days old"
+            # Check if PR has been ready for review longer than threshold
+            if [[ "$PR_READY_DATE" > "$DATE_THRESHOLD" ]]; then
+              echo "   ❌ PR has been ready for less than $MIN_DAYS_OLD days"
               continue
             fi
 
-            echo "   ✅ PR is older than $MIN_DAYS_OLD days"
+            echo "   ✅ PR has been ready for review for $MIN_DAYS_OLD+ days"
 
             # Check if PR is waiting for review
             REVIEWS=$(get_pr_reviews "$PR_NUMBER")
@@ -340,9 +461,13 @@ jobs:
             echo "   ✅ PR is waiting for review"
             echo "   🎯 PR matches all criteria - adding to list"
 
-            # Calculate days old
-            CREATED_TIMESTAMP=$(date -d "$PR_CREATED" +%s)
+            # Calculate days ready
+            READY_TIMESTAMP=$(date -d "$PR_READY_DATE" +%s)
             CURRENT_TIMESTAMP=$(date +%s)
+            DAYS_READY=$(( (CURRENT_TIMESTAMP - READY_TIMESTAMP) / 86400 ))
+
+            # Also calculate total days since creation for display
+            CREATED_TIMESTAMP=$(date -d "$PR_CREATED" +%s)
             DAYS_OLD=$(( (CURRENT_TIMESTAMP - CREATED_TIMESTAMP) / 86400 ))
 
             # Get requested reviewers list
@@ -368,9 +493,11 @@ jobs:
               --arg author "$PR_AUTHOR" \
               --arg url "$PR_URL" \
               --arg days "$DAYS_OLD" \
+              --arg days_ready "$DAYS_READY" \
               --arg reviewers "$REQUESTED_REVIEWERS" \
               --arg draft "$PR_DRAFT" \
-              '{number: $number, title: $title, author: $author, url: $url, daysOld: $days, requestedReviewers: $reviewers, isDraft: ($draft == "true")}')
+              --arg latest_review "$PR_LATEST_REVIEW" \
+              '{number: $number, title: $title, author: $author, url: $url, daysOld: $days, daysReady: $days_ready, requestedReviewers: $reviewers, isDraft: ($draft == "true"), latestReview: $latest_review}')
 
             FILTERED_PRS=$(echo "$FILTERED_PRS" | jq ". + [$PR_INFO]")
           done
@@ -388,98 +515,102 @@ jobs:
 
           # Prepare Slack message
           if [ "$FILTERED_COUNT" -eq 0 ]; then
-            SLACK_MESSAGE='{
-              "text": "🎉 No PRs requiring review attention today!",
-              "blocks": [
-                {
-                  "type": "section",
-                  "text": {
-                    "type": "mrkdwn",
-                    "text": "🎉 *No PRs requiring review attention today!*\n\nAll PRs are either:\n• From non-codeowners/team members\n• Recently created (less than '$MIN_DAYS_OLD' days old)\n• Already reviewed or approved"
-                  }
-                }
-              ]
-            }'
+            echo "✅ No PRs need attention - skipping Slack notification"
+            SLACK_MESSAGE=""
           else
-            # Build blocks for each PR
-            BLOCKS='[
-              {
-                "type": "section",
-                "text": {
-                  "type": "mrkdwn",
-                  "text": "📋 *PR Review Reminder for '$REPO_OWNER'/'$REPO_NAME'*\n\nFound '$FILTERED_COUNT' PR(s) that need attention:"
-                }
-              },
-              {"type": "divider"}
-            ]'
+            # Build header and PR list with divider
+            HEADER_TEXT=":bloc_notes: PR Review Reminder for $REPO_OWNER/$REPO_NAME\nFound $FILTERED_COUNT PR(s) that need attention:"
 
+            PR_LIST_TEXT=""
             for i in $(seq 0 $((FILTERED_COUNT - 1))); do
               PR=$(echo "$FILTERED_PRS" | jq ".[$i]")
 
               PR_TITLE=$(echo "$PR" | jq -r '.title')
-              PR_AUTHOR=$(echo "$PR" | jq -r '.author')
               PR_URL=$(echo "$PR" | jq -r '.url')
-              PR_DAYS=$(echo "$PR" | jq -r '.daysOld')
+              PR_DAYS_READY=$(echo "$PR" | jq -r '.daysReady')
               PR_REVIEWERS=$(echo "$PR" | jq -r '.requestedReviewers')
               PR_DRAFT=$(echo "$PR" | jq -r '.isDraft')
+              PR_LATEST_REVIEW=$(echo "$PR" | jq -r '.latestReview')
 
-              DRAFT_BADGE=""
-              if [ "$PR_DRAFT" = "true" ]; then
-                DRAFT_BADGE="🔸 *DRAFT* "
-              fi
-
-              REVIEWER_TEXT=""
-              if [ -n "$PR_REVIEWERS" ] && [ "$PR_REVIEWERS" != "" ] && [ "$PR_REVIEWERS" != "null" ]; then
-                REVIEWER_TEXT="👥 Waiting for: $PR_REVIEWERS\n"
+              # Alternate between • and * for bullets
+              if [ $((i % 2)) -eq 0 ]; then
+                BULLET="•"
               else
-                REVIEWER_TEXT="⏳ No specific reviewers assigned\n"
+                BULLET="*"
               fi
 
-              BLOCK=$(jq -n \
-                --arg title "$PR_TITLE" \
-                --arg author "$PR_AUTHOR" \
-                --arg url "$PR_URL" \
-                --arg days "$PR_DAYS" \
-                --arg reviewers "$REVIEWER_TEXT" \
-                --arg draft "$DRAFT_BADGE" \
-                '{
-                  "type": "section",
-                  "text": {
-                    "type": "mrkdwn",
-                    "text": ($draft + "*<" + $url + "|" + $title + ">*\n👤 Author: " + $author + "\n📅 Created: " + $days + " days ago\n" + $reviewers + "🔗 <" + $url + "|View PR>")
-                  }
-                }')
+              REVIEWER_INFO=""
+              if [ -n "$PR_REVIEWERS" ] && [ "$PR_REVIEWERS" != "" ] && [ "$PR_REVIEWERS" != "null" ]; then
+                REVIEWER_INFO=" | 👥 Waiting for: $PR_REVIEWERS"
+              fi
 
-              BLOCKS=$(echo "$BLOCKS" | jq ". + [$BLOCK]")
+              LATEST_REVIEW_INFO=""
+              if [ -n "$PR_LATEST_REVIEW" ] && [ "$PR_LATEST_REVIEW" != "" ] && [ "$PR_LATEST_REVIEW" != "null" ]; then
+                # Calculate days since last review
+                REVIEW_TIMESTAMP=$(date -d "$PR_LATEST_REVIEW" +%s)
+                CURRENT_TIMESTAMP=$(date +%s)
+                DAYS_SINCE_REVIEW=$(( (CURRENT_TIMESTAMP - REVIEW_TIMESTAMP) / 86400 ))
+                LATEST_REVIEW_INFO=" | 📝 Last review ${DAYS_SINCE_REVIEW}d ago"
+              else
+                LATEST_REVIEW_INFO=" | 📝 Last review Never"
+              fi
+
+              # Build single line: • <URL|Title> | ⏱️ ready Xd ago | 📝 Last review | 👥 Waiting for: reviewers
+              PR_LINE="$BULLET <$PR_URL|$PR_TITLE> | ⏱️ ready ${PR_DAYS_READY}d ago${LATEST_REVIEW_INFO}${REVIEWER_INFO}\n"
+              PR_LIST_TEXT="${PR_LIST_TEXT}${PR_LINE}"
             done
 
             SLACK_MESSAGE=$(jq -n \
               --arg text "PR Review Reminder - $FILTERED_COUNT PRs need attention" \
-              --argjson blocks "$BLOCKS" \
-              '{text: $text, blocks: $blocks}')
+              --arg header_text "$HEADER_TEXT" \
+              --arg pr_text "$PR_LIST_TEXT" \
+              '{
+                text: $text,
+                blocks: [
+                  {
+                    "type": "section",
+                    "text": {
+                      "type": "mrkdwn",
+                      "text": $header_text
+                    }
+                  },
+                  {"type": "divider"},
+                  {
+                    "type": "section",
+                    "text": {
+                      "type": "mrkdwn",
+                      "text": $pr_text
+                    }
+                  }
+                ]
+              }')
           fi
 
           # Send Slack notification or show dry run message
-          if [ "$DRY_RUN" = "true" ]; then
-            echo "🧪 DRY RUN MODE - Slack message that would be sent:"
-            echo "$SLACK_MESSAGE" | jq .
-            echo "✅ Dry run completed successfully"
-          else
-            echo "📤 Sending Slack notification..."
-            RESPONSE=$(curl -s -w "%{http_code}" -X POST "$SLACK_WEBHOOK_URL" \
-              -H "Content-Type: application/json" \
-              -d "$SLACK_MESSAGE")
-
-            HTTP_CODE="${RESPONSE: -3}"
-            RESPONSE_BODY="${RESPONSE%???}"
-
-            if [ "$HTTP_CODE" = "200" ]; then
-              echo "✅ Slack notification sent successfully"
+          if [ -n "$SLACK_MESSAGE" ]; then
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "🧪 DRY RUN MODE - Slack message that would be sent:"
+              echo "$SLACK_MESSAGE" | jq .
+              echo "✅ Dry run completed successfully"
             else
-              echo "❌ Failed to send Slack notification (HTTP $HTTP_CODE)"
-              echo "Response: $RESPONSE_BODY"
-              exit 1
+              echo "📤 Sending Slack notification..."
+              RESPONSE=$(curl -s -w "%{http_code}" -X POST "$SLACK_WEBHOOK_URL" \
+                -H "Content-Type: application/json" \
+                -d "$SLACK_MESSAGE")
+
+              HTTP_CODE="${RESPONSE: -3}"
+              RESPONSE_BODY="${RESPONSE%???}"
+
+              if [ "$HTTP_CODE" = "200" ]; then
+                echo "✅ Slack notification sent successfully"
+              else
+                echo "❌ Failed to send Slack notification (HTTP $HTTP_CODE)"
+                echo "Response: $RESPONSE_BODY"
+                exit 1
+              fi
             fi
+          else
+            echo "ℹ️ No message to send"
           fi
 
           # Clean up
