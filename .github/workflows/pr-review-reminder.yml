@@ -407,10 +407,10 @@ jobs:
               # Check if author is member of any team in codeowners
               for owner in $CODEOWNERS; do
                 if [[ "$owner" == *"/"* ]] || [[ "$owner" == *"-developers"* ]] || [[ "$owner" == *"-team"* ]] || [[ "$owner" == *"-maintainers"* ]]; then
-                  # if check_team_membership "$PR_AUTHOR" "$owner"; then
+                  if check_team_membership "$PR_AUTHOR" "$owner"; then
                     AUTHOR_IS_CODEOWNER=true
                     break
-                  # fi
+                  fi
                 fi
               done
             fi
