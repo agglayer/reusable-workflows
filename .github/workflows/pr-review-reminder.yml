@@ -519,7 +519,7 @@ jobs:
             SLACK_MESSAGE=""
           else
             # Build header and PR list with divider
-            HEADER_TEXT=":bloc_notes: PR Review Reminder for $REPO_OWNER/$REPO_NAME\nFound $FILTERED_COUNT PR(s) that need attention:"
+            HEADER_TEXT="📋 PR Review Reminder for $REPO_OWNER/$REPO_NAME"$'\n'"Found $FILTERED_COUNT PR(s) that need attention:"
 
             PR_LIST_TEXT=""
             for i in $(seq 0 $((FILTERED_COUNT - 1))); do
@@ -556,7 +556,7 @@ jobs:
               fi
 
               # Build single line: • <URL|Title> | ⏱️ ready Xd ago | 📝 Last review | 👥 Waiting for: reviewers
-              PR_LINE="$BULLET <$PR_URL|$PR_TITLE> | ⏱️ ready ${PR_DAYS_READY}d ago${LATEST_REVIEW_INFO}${REVIEWER_INFO}\n"
+              PR_LINE="$BULLET <$PR_URL|$PR_TITLE> | ⏱️ ready ${PR_DAYS_READY}d ago${LATEST_REVIEW_INFO}${REVIEWER_INFO}"$'\n'
               PR_LIST_TEXT="${PR_LIST_TEXT}${PR_LINE}"
             done
 
