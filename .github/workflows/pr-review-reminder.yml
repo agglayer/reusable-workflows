@@ -39,8 +39,9 @@ jobs:
       - name: Check PRs and send Slack notification
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TEAM_READ_GH_TOKEN: ${{ secrets.TEAM_READ_GH_TOKEN }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          MIN_DAYS_OLD: ${{ inputs.min_days_old }}
+          MIN_DAYS_OLD: ${{ fromJSON(inputs.min_days_old) }}
           DRY_RUN: ${{ inputs.dry_run }}
           INCLUDE_DRAFTS: ${{ inputs.include_drafts }}
         run: |
@@ -63,13 +64,17 @@ jobs:
             exit 1
           fi
 
-          # Test GitHub token validity
+          # Test GitHub token validity using repository endpoint
           echo "🔐 Validating GitHub token..."
+
+          # Use repository endpoint which works with GITHUB_TOKEN
+          REPO_ENDPOINT="https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}"
+
           TOKEN_TEST=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
             -H "Accept: application/vnd.github.v3+json" \
             -H "User-Agent: PR-Review-Reminder/1.0" \
             -w "%{http_code}" \
-            https://api.github.com/user)
+            "$REPO_ENDPOINT")
 
           HTTP_CODE="${TOKEN_TEST: -3}"
           TOKEN_RESPONSE="${TOKEN_TEST%???}"
@@ -79,14 +84,15 @@ jobs:
             echo "Token response: $TOKEN_RESPONSE"
             echo "📝 Possible issues:"
             echo "  - Token is expired or invalid"
-            echo "  - Token doesn't have required permissions"
+            echo "  - Token doesn't have required permissions for repository access"
             echo "  - Rate limit exceeded"
             echo "  - Network connectivity issues"
             exit 1
           fi
 
-          TOKEN_USER=$(echo "$TOKEN_RESPONSE" | jq -r '.login // "unknown"')
-          echo "✅ GitHub token valid for user: $TOKEN_USER"
+          REPO_NAME_RESPONSE=$(echo "$TOKEN_RESPONSE" | jq -r '.name // "unknown"')
+          REPO_OWNER_RESPONSE=$(echo "$TOKEN_RESPONSE" | jq -r '.owner.login // "unknown"')
+          echo "✅ GitHub token valid - accessed repository: $REPO_OWNER_RESPONSE/$REPO_NAME_RESPONSE"
 
           # Validate inputs
           if [ "$DRY_RUN" = "false" ] && [ -z "$SLACK_WEBHOOK_URL" ]; then
@@ -101,6 +107,12 @@ jobs:
             -H "User-Agent: PR-Review-Reminder/1.0"
           )
 
+          # GitHub API headers
+          MEMBERSHIP_API_HEADERS=(
+            -H "Authorization: token $TEAM_READ_GH_TOKEN"
+            -H "Accept: application/vnd.github.v3+json"
+            -H "User-Agent: PR-Review-Reminder/1.0"
+          )
           # Get codeowners from CODEOWNERS file
           CODEOWNERS=""
           if [ -f ".github/CODEOWNERS" ]; then
@@ -186,7 +198,7 @@ jobs:
             fi
 
             # Check team membership via API
-            local membership_response=$(curl -s "${API_HEADERS[@]}" \
+            local membership_response=$(curl -s "${MEMBERSHIP_API_HEADERS[@]}" \
               -w "%{http_code}" \
               "https://api.github.com/orgs/$org/teams/$team/memberships/$author" 2>/dev/null)
 
