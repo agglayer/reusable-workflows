@@ -550,7 +550,9 @@ jobs:
               fi
 
               # Build single line: • <URL|Title> ⏱️ ready Xd ago / Last review | Waiting for: reviewers
-              PR_LINE="$BULLET <$PR_URL|$PR_TITLE>'\n\t' ⏱️ ready ${PR_DAYS_READY}d ago${LATEST_REVIEW_INFO}${REVIEWER_INFO}"$'\n'
+              BULLET_AND_TITLE="$BULLET <$PR_URL|$PR_TITLE>"$'\n\t'
+              PR_CONTEXT="⏱️ ready ${PR_DAYS_READY}d ago${LATEST_REVIEW_INFO}${REVIEWER_INFO}"$'\n'
+              PR_LINE="${BULLET_AND_TITLE}${PR_CONTEXT}"
               PR_LIST_TEXT="${PR_LIST_TEXT}${PR_LINE}"
             done
 
