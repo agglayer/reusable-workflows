@@ -532,7 +532,6 @@ jobs:
               PR_DRAFT=$(echo "$PR" | jq -r '.isDraft')
               PR_LATEST_REVIEW=$(echo "$PR" | jq -r '.latestReview')
               BULLET="•"
-              BREAK_LINE="\n\t"
 
               REVIEWER_INFO=""
               if [ -n "$PR_REVIEWERS" ] && [ "$PR_REVIEWERS" != "" ] && [ "$PR_REVIEWERS" != "null" ]; then
@@ -551,7 +550,7 @@ jobs:
               fi
 
               # Build single line: • <URL|Title> ⏱️ ready Xd ago / Last review | Waiting for: reviewers
-              PR_LINE="$BULLET <$PR_URL|$PR_TITLE>${BREAK_LINE} ⏱️ ready ${PR_DAYS_READY}d ago${LATEST_REVIEW_INFO}${REVIEWER_INFO}"$'\n'
+              PR_LINE="$BULLET <$PR_URL|$PR_TITLE>'\n\t' ⏱️ ready ${PR_DAYS_READY}d ago${LATEST_REVIEW_INFO}${REVIEWER_INFO}"$'\n'
               PR_LIST_TEXT="${PR_LIST_TEXT}${PR_LINE}"
             done
 
