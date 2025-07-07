@@ -1,0 +1,55 @@
+name: Push on PR
+
+on:
+  workflow_call:
+    inputs:
+      use-foundry:
+        description: "Whether to use foundry in tests"
+        type: boolean
+        default: true
+      nextest-args:
+        description: "Arguments to pass to nextest"
+        type: string
+        default: "--workspace"
+
+concurrency:
+  group: ${{ github.event_name == 'workflow_call' && format('called-workflow-{0}', github.run_id) || format('pr-workflow-{0}', github.ref) }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_call' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust-unit:
+    name: Rust unit-tests
+    secrets: inherit
+    uses: .github/workflows/rust-unit.yml@main
+    with:
+      use-foundry: true
+      nextest-args: --workspace
+
+  format:
+    name: Rust format checking
+    secrets: inherit
+    uses: .github/workflows/rust-format.yml@main
+    permissions:
+      checks: write
+      contents: read
+
+  linting:
+    name: Rust linting
+    secrets: inherit
+    uses: .github/workflows/rust-lint.yml@main
+    permissions:
+      checks: write
+      contents: read
+
+  check-result:
+    name: All Checks Passed
+    needs:
+      - rust-unit
+      - linting
+      - format
+    runs-on: ubuntu-latest
+    steps:
+      - run: exit ${{ contains(needs.*.result, 'failure') && 1 || 0 }}
