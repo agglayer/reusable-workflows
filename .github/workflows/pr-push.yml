@@ -23,7 +23,7 @@ jobs:
   rust-unit:
     name: Rust unit-tests
     secrets: inherit
-    uses: .github/workflows/rust-unit.yml@main
+    uses: ./.github/workflows/rust-unit.yml@main
     with:
       use-foundry: true
       nextest-args: --workspace
@@ -31,7 +31,7 @@ jobs:
   format:
     name: Rust format checking
     secrets: inherit
-    uses: .github/workflows/rust-format.yml@main
+    uses: ./.github/workflows/rust-format.yml@main
     permissions:
       checks: write
       contents: read
@@ -39,7 +39,7 @@ jobs:
   linting:
     name: Rust linting
     secrets: inherit
-    uses: .github/workflows/rust-lint.yml@main
+    uses: ./.github/workflows/rust-lint.yml@main
     permissions:
       checks: write
       contents: read
