@@ -43,13 +43,3 @@ jobs:
     permissions:
       checks: write
       contents: read
-
-  check-result:
-    name: All Checks Passed
-    needs:
-      - rust-unit
-      - linting
-      - format
-    runs-on: ubuntu-latest
-    steps:
-      - run: exit ${{ contains(needs.*.result, 'failure') && 1 || 0 }}
