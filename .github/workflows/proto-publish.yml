@@ -1,0 +1,99 @@
+# Protobuf Publishing Workflow
+#
+# This reusable workflow publishes protobuf definitions to Buf Schema Registry (BSR).
+#
+# CONDITIONAL EXECUTION:
+# The workflow only publishes when EITHER condition is met:
+# - use-git-metadata is set to true, OR
+# - at least one label is provided (non-empty labels input)
+#
+# INPUTS:
+# - use-git-metadata (boolean, default: false)
+#   When true, adds --git-metadata flag to use git metadata for versioning
+#
+# - labels (string, default: "")
+#   Comma-separated labels to apply to the published version
+#   Labels are automatically trimmed of whitespace and each gets a --label flag
+#
+# EXAMPLES:
+#
+# Basic usage with git metadata:
+#   uses: agglayer/reusable-workflows/.github/workflows/proto-publish.yml@main
+#   with:
+#     use-git-metadata: true
+#   secrets:
+#     BUF_TOKEN: ${{ secrets.BUF_TOKEN }}
+#
+# Usage with labels:
+#   uses: agglayer/reusable-workflows/.github/workflows/proto-publish.yml@main
+#   with:
+#     labels: "dev, staging, prod"
+#   secrets:
+#     BUF_TOKEN: ${{ secrets.BUF_TOKEN }}
+#
+# Combined usage:
+#   uses: agglayer/reusable-workflows/.github/workflows/proto-publish.yml@main
+#   with:
+#     use-git-metadata: true
+#     labels: "production, stable"
+#   secrets:
+#     BUF_TOKEN: ${{ secrets.BUF_TOKEN }}
+#
+# GENERATED COMMANDS:
+# - use-git-metadata: true → buf push --git-metadata
+# - labels: "dev,staging, prod " → buf push --label dev --label staging --label prod
+# - Both → buf push --git-metadata --label dev --label staging --label prod
+# - Neither → Step is skipped entirely
+#
+# REQUIREMENTS:
+# - BUF_TOKEN secret must be configured in the calling repository
+# - Repository must have protobuf definitions compatible with buf
+
+name: Protobuf publish
+
+on:
+  workflow_call:
+    inputs:
+      use-git-metadata:
+        description: Whether to use git metadata for the versioning
+        type: boolean
+        default: false
+      labels:
+        description: Labels to apply to the published version, comma-separated
+        type: string
+        default: ""
+
+jobs:
+  push-proto-to-bsr:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # Fetch full history for tags and git metadata
+
+      - uses: bufbuild/buf-action@v1
+        with:
+          token: ${{ secrets.BUF_TOKEN }}
+          setup_only: true
+
+      - name: Publishing
+        if: ${{ inputs.use-git-metadata == true || inputs.labels != '' }}
+        run: |
+          COMMAND="buf push"
+
+          if [ "${{ inputs.use-git-metadata }}" == "true" ]; then
+            COMMAND="$COMMAND --git-metadata"
+          fi
+
+          if [ -n "${{ inputs.labels }}" ]; then
+            IFS=',' read -ra LABELS <<< "${{ inputs.labels }}"
+            for label in "${LABELS[@]}"; do
+              label=$(echo "$label" | xargs)  # trim whitespace
+              if [ -n "$label" ]; then
+                COMMAND="$COMMAND --label $label"
+              fi
+            done
+          fi
+
+          echo "Executing: $COMMAND"
+          $COMMAND
