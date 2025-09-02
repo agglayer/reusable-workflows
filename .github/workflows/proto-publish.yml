@@ -64,6 +64,26 @@ on:
         default: ""
 
 jobs:
+  extract-labels:
+    name: Extract labels
+    runs-on: ubuntu-latest
+    steps:
+      - name: Determine labels
+        id: labels
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            BRANCH_NAME=${GITHUB_REF#refs/heads/}
+            echo "labels=${BRANCH_NAME}" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.event_name }}" == "push" && "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "labels=main" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.event_name }}" == "workflow_run" ]]; then
+            echo "labels=${{ github.event.workflow_run.head_branch }}" >> $GITHUB_OUTPUT
+          else
+            echo "labels=" >> $GITHUB_OUTPUT
+          fi
+    outputs:
+      labels: ${{ steps.labels.outputs.labels }}
+
   push-proto-to-bsr:
     runs-on: ubuntu-latest
     steps:
