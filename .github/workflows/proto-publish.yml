@@ -57,7 +57,7 @@ on:
       use-git-metadata:
         description: Whether to use git metadata for the versioning
         type: boolean
-        default: false
+        default: true
       labels:
         description: Labels to apply to the published version, comma-separated
         type: string
