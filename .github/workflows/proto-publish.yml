@@ -54,6 +54,11 @@ name: Protobuf publish
 on:
   workflow_call:
     inputs:
+      ref:
+        description: "Branch or tag to checkout"
+        required: false
+        default: "main"
+        type: string
       use-git-metadata:
         description: Whether to use git metadata for the versioning
         type: boolean
@@ -89,6 +94,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
+          ref: ${{ inputs.ref }}
           fetch-depth: 0 # Fetch full history for tags and git metadata
 
       - uses: bufbuild/buf-action@v1
