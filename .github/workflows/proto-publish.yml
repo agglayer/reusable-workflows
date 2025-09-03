@@ -90,6 +90,7 @@ jobs:
       labels: ${{ steps.labels.outputs.labels }}
 
   push-proto-to-bsr:
+    needs: [extract-labels]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -103,7 +104,7 @@ jobs:
           setup_only: true
 
       - name: Publishing
-        if: ${{ inputs.use-git-metadata == true || inputs.labels != '' }}
+        if: ${{ inputs.use-git-metadata == true || inputs.labels != '' || needs.extract-labels.outputs.labels != '' }}
         run: |
           COMMAND="buf push"
 
@@ -111,8 +112,16 @@ jobs:
             COMMAND="$COMMAND --git-metadata"
           fi
 
+          # Use input labels if provided, otherwise use extracted labels
+          LABELS_TO_USE=""
           if [ -n "${{ inputs.labels }}" ]; then
-            IFS=',' read -ra LABELS <<< "${{ inputs.labels }}"
+            LABELS_TO_USE="${{ inputs.labels }}"
+          elif [ -n "${{ needs.extract-labels.outputs.labels }}" ]; then
+            LABELS_TO_USE="${{ needs.extract-labels.outputs.labels }}"
+          fi
+
+          if [ -n "$LABELS_TO_USE" ]; then
+            IFS=',' read -ra LABELS <<< "$LABELS_TO_USE"
             for label in "${LABELS[@]}"; do
               label=$(echo "$label" | xargs)  # trim whitespace
               if [ -n "$label" ]; then
