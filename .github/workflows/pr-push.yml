@@ -1,0 +1,81 @@
+name: Push on PR
+
+on:
+  workflow_call:
+    inputs:
+      isolated-compilation-check:
+        description: "Enable isolated compilation check"
+        type: boolean
+        default: false
+      use-foundry:
+        description: "Whether to use foundry in tests"
+        type: boolean
+        default: true
+      nextest-args:
+        description: "Arguments to pass to nextest"
+        type: string
+        default: "--workspace"
+      integrations:
+        description: "Run integration tests"
+        type: boolean
+        default: false
+      integration-args:
+        description: "Arguments to pass to integration tests"
+        type: string
+        default: "--workspace -P integrations"
+      integration-timeout:
+        description: "Timeout for integration tests in minutes"
+        type: number
+        default: 30
+      integration-build-L1-contracts:
+        description: "Build L1 contracts for integration tests"
+        type: boolean
+        default: true
+      integration-L1-contracts-ref:
+        description: "Git ref of the L1 contracts repository for integration tests"
+        type: string
+        default: "feature/ongoing-v0.3.0"
+
+permissions:
+  contents: read
+  checks: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust-unit:
+    name: Rust unit-tests
+    secrets: inherit
+    uses: ./.github/workflows/rust-unit.yml
+    with:
+      use-foundry: true
+      isolated-compilation-check: ${{ inputs.isolated-compilation-check }}
+      nextest-args: --workspace
+
+  rust-integration:
+    name: Rust integration tests
+    secrets: inherit
+    uses: ./.github/workflows/rust-integration.yml
+    if: ${{ inputs.integrations }}
+    with:
+      nextest-args: ${{ inputs.integration-args }}
+      build-L1-contracts: ${{ inputs.integration-build-L1-contracts }}
+      L1-contracts-ref: ${{ inputs.integration-L1-contracts-ref }}
+      test-timeout: ${{ inputs.integration-timeout }}
+
+  format:
+    name: Rust format checking
+    secrets: inherit
+    uses: ./.github/workflows/rust-format.yml
+    permissions:
+      checks: write
+      contents: read
+
+  linting:
+    name: Rust linting
+    secrets: inherit
+    uses: ./.github/workflows/rust-lint.yml
+    permissions:
+      checks: write
+      contents: read

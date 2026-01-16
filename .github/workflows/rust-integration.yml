@@ -1,0 +1,138 @@
+name: Rust unit tests
+
+on:
+  workflow_call:
+    inputs:
+      build-L1-contracts:
+        description: "Build L1 contracts"
+        type: boolean
+        default: true
+      L1-contracts-ref:
+        description: "git ref of the L1 contracts repository"
+        type: string
+        default: "feature/ongoing-v0.3.0"
+      test-timeout:
+        description: "Timeout for integration tests in minutes"
+        type: number
+        default: 30
+      nextest-args:
+        description: "Args passed to cargo nextest run"
+        default: "--workspace -P integrations"
+        required: true
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+  REGISTRY: ghcr.io
+  RUSTC_WRAPPER: sccache
+  CARGO_NET_GIT_FETCH_WITH_CLI: true
+  SCCACHE_GHA_ENABLED: true
+  RUSTFLAGS: "-C target-cpu=native -C codegen-units=1"
+
+jobs:
+  # building-L1-contracts:
+  #   name: Building L1 contracts
+  #   if: ${{ inputs.build-L1-contracts }}
+  #   runs-on: ubuntu-latest-16-cores
+  #   steps:
+  #     - name: Use Node.js 20.x
+  #       uses: actions/setup-node@v4
+  #       with:
+  #         node-version: 20.x
+  #     - name: Checkout code
+  #       uses: actions/checkout@v4
+  #       with:
+  #         repository: agglayer/agglayer-contracts
+  #         ref: ${{ inputs.L1-contracts-ref }}
+
+  #     - name: Set up QEMU
+  #       uses: docker/setup-qemu-action@v3
+
+  #     - name: Set up Docker Buildx
+  #       uses: docker/setup-buildx-action@v3
+
+  #     - name: Install npm packages
+  #       run: |
+  #         npm i
+  #     - name: Build docker
+  #       run: |
+  #         npm run dockerv2:contracts:all
+
+  #     - name: Extract metadata (tags, labels) for Docker
+  #       id: meta
+  #       uses: docker/metadata-action@v5
+  #       with:
+  #         images: hermeznetwork/geth-zkevm-contracts
+
+  #     - name: Build
+  #       uses: docker/build-push-action@v6
+  #       with:
+  #         context: .
+  #         push: false
+  #         tags: hermeznetwork/geth-zkevm-contracts:latest
+  #         file: docker/Dockerfile
+  #         labels: ${{ steps.meta.outputs.labels }}
+  #         outputs: ${{ format('type=docker,dest={0}/{1}.tar', '/tmp', 'contracts-image') }}
+  #         cache-from: type=gha
+  #         cache-to: type=gha,mode=max
+
+  #     - name: Upload artifact
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: "contracts-image"
+  #         path: /tmp/contracts-image.tar
+
+  integration-tests:
+    name: Integration tests
+    # needs:
+    #   - building-L1-contracts
+    runs-on: ubuntu-latest-16-cores
+    timeout-minutes: ${{ inputs.test-timeout }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Pull docker image
+        run: |
+          docker pull ghcr.io/agglayer/agglayer-contracts:pr-496
+          docker tag ghcr.io/agglayer/agglayer-contracts:pr-496 hermeznetwork/geth-zkevm-contracts:latest
+      # - name: Download artifact
+      #   uses: actions/download-artifact@v4
+      #   with:
+      #     name: "contracts-image"
+      #     path: "/tmp"
+
+      # - name: Load image
+      #   run: |
+      #     echo ${{ needs.build_contracts_image.outputs.tags }}
+      #     docker load --input /tmp/contracts-image.tar
+      #     docker image ls -a
+
+      - name: Generate cache key
+        id: cache_key
+        run: echo "key=${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}" >> $GITHUB_OUTPUT
+
+      - name: Install toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run sccache-cache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: nextest,protoc,cargo-hack
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "v2-rust"
+          shared-key: ${{ steps.cache_key.outputs.key }}
+          cache-targets: false
+          cache-directories: |
+            ~/.cache/sccache
+
+      - name: Install Anvil
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Run integration tests
+        run: cargo nextest run ${{ inputs.nextest-args }}
