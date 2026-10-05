@@ -75,16 +75,20 @@ jobs:
     steps:
       - name: Determine labels
         id: labels
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_REF: ${{ github.ref }}
+          WORKFLOW_RUN_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
         run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
             BRANCH_NAME=${GITHUB_REF#refs/heads/}
-            echo "labels=${BRANCH_NAME}" >> $GITHUB_OUTPUT
-          elif [[ "${{ github.event_name }}" == "push" && "${{ github.ref }}" == "refs/heads/main" ]]; then
-            echo "labels=main" >> $GITHUB_OUTPUT
-          elif [[ "${{ github.event_name }}" == "workflow_run" ]]; then
-            echo "labels=${{ github.event.workflow_run.head_branch }}" >> $GITHUB_OUTPUT
+            echo "labels=${BRANCH_NAME}" >> "$GITHUB_OUTPUT"
+          elif [[ "$EVENT_NAME" == "push" && "$EVENT_REF" == "refs/heads/main" ]]; then
+            echo "labels=main" >> "$GITHUB_OUTPUT"
+          elif [[ "$EVENT_NAME" == "workflow_run" ]]; then
+            echo "labels=${WORKFLOW_RUN_HEAD_BRANCH}" >> "$GITHUB_OUTPUT"
           else
-            echo "labels=" >> $GITHUB_OUTPUT
+            echo "labels=" >> "$GITHUB_OUTPUT"
           fi
     outputs:
       labels: ${{ steps.labels.outputs.labels }}
@@ -98,26 +102,30 @@ jobs:
           ref: ${{ inputs.ref }}
           fetch-depth: 0 # Fetch full history for tags and git metadata
 
-      - uses: bufbuild/buf-action@v1
+      - uses: bufbuild/buf-action@8c6a16e16f12ba20b6470afa9c2ba9b5ba8c97c3 # v1
         with:
           token: ${{ secrets.BUF_TOKEN }}
           setup_only: true
 
       - name: Publishing
         if: ${{ inputs.use-git-metadata == true || inputs.labels != '' || needs.extract-labels.outputs.labels != '' }}
+        env:
+          USE_GIT_METADATA: ${{ inputs.use-git-metadata }}
+          INPUT_LABELS: ${{ inputs.labels }}
+          EXTRACTED_LABELS: ${{ needs.extract-labels.outputs.labels }}
         run: |
           COMMAND="buf push"
 
-          if [ "${{ inputs.use-git-metadata }}" == "true" ]; then
+          if [ "$USE_GIT_METADATA" == "true" ]; then
             COMMAND="$COMMAND --git-metadata"
           fi
 
           # Use input labels if provided, otherwise use extracted labels
           LABELS_TO_USE=""
-          if [ -n "${{ inputs.labels }}" ]; then
-            LABELS_TO_USE="${{ inputs.labels }}"
-          elif [ -n "${{ needs.extract-labels.outputs.labels }}" ]; then
-            LABELS_TO_USE="${{ needs.extract-labels.outputs.labels }}"
+          if [ -n "$INPUT_LABELS" ]; then
+            LABELS_TO_USE="$INPUT_LABELS"
+          elif [ -n "$EXTRACTED_LABELS" ]; then
+            LABELS_TO_USE="$EXTRACTED_LABELS"
           fi
 
           if [ -n "$LABELS_TO_USE" ]; then

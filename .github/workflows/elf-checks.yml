@@ -36,35 +36,43 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Define source checksum
+        env:
+          PROGRAM_PATH: ${{ inputs.program-path }}
         run: |
-          echo CHECKSUM="$(sha256sum ${{ inputs.program-path }} | awk '{ print $1 }')" >> "$GITHUB_ENV"
+          echo CHECKSUM="$(sha256sum "$PROGRAM_PATH" | awk '{ print $1 }')" >> "$GITHUB_ENV"
 
       - name: Install toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+        with:
+          toolchain: stable
 
       - name: Generate cache key
         id: cache_key
         run: echo "key=${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}" >> $GITHUB_OUTPUT
 
       - name: Set up rust cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           shared-key: ${{ steps.cache_key.outputs.key }}
 
-      - uses: taiki-e/install-action@protoc
+      - uses: taiki-e/install-action@f3648dbd8c08ef08b733f8b5990215a41c01cbaa # protoc
         if: ${{ inputs.install-protoc }}
+        with:
+          tool: protoc
 
       - name: Define vKey
         run: |
           echo ORIGINAL_VKEY="$(${{ inputs.vkey-resolver }})" >> "$GITHUB_ENV"
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
-      - uses: taiki-e/install-action@protoc
+      - uses: taiki-e/install-action@f3648dbd8c08ef08b733f8b5990215a41c01cbaa # protoc
+        with:
+          tool: protoc
 
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
@@ -79,7 +87,9 @@ jobs:
         run: PATH="/home/runner/.sp1/bin:$PATH" ${{ inputs.program-builder }}
 
       - name: ELF is up to date
-        run: diff <(sha256sum ${{ inputs.program-path }} | awk '{ print $1 }') <( echo $CHECKSUM )
+        env:
+          PROGRAM_PATH: ${{ inputs.program-path }}
+        run: diff <(sha256sum "$PROGRAM_PATH" | awk '{ print $1 }') <( echo $CHECKSUM )
 
       - name: Check vKey
         run: |

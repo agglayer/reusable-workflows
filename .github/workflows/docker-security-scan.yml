@@ -38,7 +38,9 @@ jobs:
     steps:
       - name: Pull Docker image
         if: inputs.scan-type == 'image'
-        run: docker pull ${{ inputs.docker-image }}
+        env:
+          DOCKER_IMAGE: ${{ inputs.docker-image }}
+        run: docker pull "$DOCKER_IMAGE"
 
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
@@ -61,6 +63,8 @@ jobs:
 
       - name: Process scan results
         id: scan-summary
+        env:
+          FAIL_ON_SEVERITY: ${{ inputs.fail-on-severity }}
         run: |
           if [ -f scan-summary.json ]; then
             CRITICAL=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="CRITICAL")] | length' scan-summary.json 2>/dev/null || echo "0")
@@ -78,10 +82,10 @@ jobs:
             echo "| Medium | $MEDIUM |" >> $GITHUB_STEP_SUMMARY
             echo "| Low | $LOW |" >> $GITHUB_STEP_SUMMARY
             
-            if [ "${{ inputs.fail-on-severity }}" = "CRITICAL" ] && [ "$CRITICAL" -gt 0 ]; then
+            if [ "$FAIL_ON_SEVERITY" = "CRITICAL" ] && [ "$CRITICAL" -gt 0 ]; then
               echo "❌ Critical vulnerabilities found: $CRITICAL"
               exit 1
-            elif [ "${{ inputs.fail-on-severity }}" = "HIGH" ] && [ $((CRITICAL + HIGH)) -gt 0 ]; then
+            elif [ "$FAIL_ON_SEVERITY" = "HIGH" ] && [ $((CRITICAL + HIGH)) -gt 0 ]; then
               echo "❌ High or Critical vulnerabilities found: $((CRITICAL + HIGH))"
               exit 1
             fi
@@ -90,7 +94,7 @@ jobs:
           fi
 
       - name: Upload Trivy scan results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@1190a975f95ce23525efb6a3fc21ea29567c1b52 # v3
         if: always()
         with:
           sarif_file: ${{ inputs.sarif-output }}

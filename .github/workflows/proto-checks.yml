@@ -25,7 +25,7 @@ jobs:
           repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
           ref: ${{ github.head_ref || github.event.pull_request.head.ref || github.ref }}
 
-      - uses: bufbuild/buf-action@v1
+      - uses: bufbuild/buf-action@8c6a16e16f12ba20b6470afa9c2ba9b5ba8c97c3 # v1
         with:
           token: ${{ secrets.BUF_TOKEN }}
           setup_only: true
@@ -51,21 +51,23 @@ jobs:
         run: git status --porcelain crates > before.txt
 
       - name: Install toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+        with:
+          toolchain: stable
 
       - name: Generate cache key
         id: cache_key
         run: echo "key=${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}" >> $GITHUB_OUTPUT
 
       - name: Set up rust cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           shared-key: ${{ steps.cache_key.outputs.key }}
 
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
 
-      - uses: bufbuild/buf-action@v1
+      - uses: bufbuild/buf-action@8c6a16e16f12ba20b6470afa9c2ba9b5ba8c97c3 # v1
         with:
           token: ${{ secrets.BUF_TOKEN }}
           setup_only: true
@@ -94,18 +96,22 @@ jobs:
 
       - name: Define BREAKING_REF for merge_group
         if: github.event_name == 'merge_group'
-        run: echo "BREAKING_REF=ref=${{ github.event.merge_group.base_sha }}" >> $GITHUB_ENV
+        env:
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+        run: echo "BREAKING_REF=ref=${MERGE_GROUP_BASE_SHA}" >> "$GITHUB_ENV"
 
       - name: Define BREAKING_REF for pull_request
         if: github.event_name == 'pull_request'
-        run: echo "BREAKING_REF=ref=${{ github.event.pull_request.base.sha }}" >> $GITHUB_ENV
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: echo "BREAKING_REF=ref=${PR_BASE_SHA}" >> "$GITHUB_ENV"
 
         # Check if the retry attempt is by an admin
         # If it is, it will trigger an approval
       - name: Check retry attempt by admin
         id: authorized_list
         if: ${{ github.run_attempt > 1 }}
-        uses: morfien101/actions-authorized-user@v3
+        uses: morfien101/actions-authorized-user@4a3cfbf0bcb3cafe4a71710a278920c5d94bb38b # v3
         with:
           username: ${{ github.triggering_actor }}
           org: agglayer
@@ -114,7 +120,7 @@ jobs:
           multi_user: false
 
       - name: Breaking changes detection
-        uses: bufbuild/buf-action@v1
+        uses: bufbuild/buf-action@8c6a16e16f12ba20b6470afa9c2ba9b5ba8c97c3 # v1
         id: breaking
         # Ignoring breaking as if a breaking arrives on main, it has been approved before.
         if: github.event_name != 'push' && env.PROTO_BREAKING_DETECTION == 'true'
@@ -130,7 +136,7 @@ jobs:
 
       - name: Wait for approval
         if: ${{ (steps.authorized_list.outputs.authorized == 'true' || github.event_name == 'merge_group') && steps.breaking.outcome == 'failure' }}
-        uses: trstringer/manual-approval@v1
+        uses: trstringer/manual-approval@fa642940caf8412403569b28b2db4a1df08a83a3 # v1
         with:
           secret: ${{ secrets.TEAM_READ_GH_TOKEN }}
           issue-title: "Breaking changes attempt on protobuf definition"
