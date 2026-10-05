@@ -32,20 +32,21 @@ jobs:
         id: cache_key
         run: echo "key=${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}" >> $GITHUB_OUTPUT
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
         with:
+          toolchain: stable
           components: clippy
 
       - name: Run sccache-cache
-        uses: mozilla-actions/sccache-action@v0.0.9
+        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
 
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # v2
         if: ${{ inputs.use-cargo-make}}
         with:
           tool: cargo-make,protoc
 
       - name: Rust Cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           prefix-key: "v2-rust"
           shared-key: ${{ steps.cache_key.outputs.key }}

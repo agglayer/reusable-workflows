@@ -44,13 +44,16 @@ jobs:
           MIN_DAYS_OLD: ${{ fromJSON(inputs.min_days_old) }}
           DRY_RUN: ${{ inputs.dry_run }}
           INCLUDE_DRAFTS: ${{ inputs.include_drafts }}
+          REPOSITORY_INPUT: ${{ inputs.repository }}
+          DEFAULT_REPO_OWNER: ${{ github.repository_owner }}
+          DEFAULT_REPO_NAME: ${{ github.event.repository.name }}
         run: |
           # Get repository info
-          if [ -n "${{ inputs.repository }}" ]; then
-            IFS='/' read -r REPO_OWNER REPO_NAME <<< "${{ inputs.repository }}"
+          if [ -n "$REPOSITORY_INPUT" ]; then
+            IFS='/' read -r REPO_OWNER REPO_NAME <<< "$REPOSITORY_INPUT"
           else
-            REPO_OWNER="${{ github.repository_owner }}"
-            REPO_NAME="${{ github.event.repository.name }}"
+            REPO_OWNER="$DEFAULT_REPO_OWNER"
+            REPO_NAME="$DEFAULT_REPO_NAME"
           fi
 
           echo "🔍 Checking PRs for $REPO_OWNER/$REPO_NAME"
